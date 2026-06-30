@@ -104,12 +104,25 @@ function ExpenseModal({ initial, onClose, onSave }) {
 
   const submit = (e) => {
     e.preventDefault();
+    
     const amt = parseFloat(form.amount);
     if (!form.date || !form.desc.trim() || isNaN(amt) || amt <= 0) {
       setError("Please fill in name/description, date, and a valid amount.");
       return;
     }
-    onSave({ ...form, amount: amt, desc: form.desc.trim() });
+    console.log("Saving expense:", form);
+    fetch("http://localhost:3000/expense", { method:"POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form) })
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("Expense saved:", data);
+        onSave(data);
+      })
+      .catch((err) => {
+        console.error("Error saving expense:", err);
+        setError("Failed to save expense.");
+      });
   };
 
   return (
@@ -264,8 +277,20 @@ function FiltersDropdown({ filters, onChange, onClose, onReset }) {
 
 const PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 
+function normalizeExpense(expense) {
+  return {
+    id: expense?.id ?? Date.now(),
+    date: expense?.date ?? new Date().toISOString().slice(0, 10),
+    category: expense?.category ?? "Others",
+    desc: expense?.desc ?? expense?.description ?? "",
+    amount: Number(expense?.amount ?? 0),
+    method: expense?.method ?? "Cash",
+    by: expense?.by ?? "Priom Sheikh",
+  };
+}
+
 export default function Expenses() {
-  const [expenses, setExpenses] = useState(initialExpenses);
+  const [expenses, setExpenses] = useState(initialExpenses.map(normalizeExpense));
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState({ category: "Category", method: "All" });
   const [page, setPage] = useState(1);
@@ -277,35 +302,38 @@ export default function Expenses() {
   const [showFilters, setShowFilters] = useState(false);
   const [dateRange, setDateRange] = useState({ start: "2024-05-20", end: "2024-05-26" });
 
+  const normalizedExpenses = useMemo(() => expenses.map(normalizeExpense), [expenses]);
+
   // ── Derived: filtered + sorted list ──
   const filtered = useMemo(() => {
-    return expenses
+    const query = search.toLowerCase();
+    return normalizedExpenses
       .filter((e) => {
         const matchesSearch =
-          e.desc.toLowerCase().includes(search.toLowerCase()) ||
-          e.category.toLowerCase().includes(search.toLowerCase());
+          e.desc.toLowerCase().includes(query) ||
+          e.category.toLowerCase().includes(query);
         const matchesCategory = filters.category === "Category" || e.category === filters.category;
         const matchesMethod = filters.method === "All" || e.method === filters.method;
         return matchesSearch && matchesCategory && matchesMethod;
       })
       .sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [expenses, search, filters]);
+  }, [normalizedExpenses, search, filters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   // ── Derived: stats ──
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const thisWeekTotal = expenses
+  const totalExpenses = normalizedExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const thisWeekTotal = normalizedExpenses
     .filter((e) => e.date >= dateRange.start && e.date <= dateRange.end)
     .reduce((sum, e) => sum + e.amount, 0);
   const avgDaily = Math.round(thisWeekTotal / 7);
-  const uniqueCategories = new Set(expenses.map((e) => e.category)).size;
+  const uniqueCategories = new Set(normalizedExpenses.map((e) => e.category)).size;
 
   const categoryTotals = useMemo(() => {
     const map = {};
-    expenses.forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
+    normalizedExpenses.forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
     const total = Object.values(map).reduce((a, b) => a + b, 0) || 1;
     return Object.entries(map)
       .map(([label, amount]) => ({
@@ -346,13 +374,13 @@ export default function Expenses() {
 
   // ── Handlers ──
   const handleAdd = (data) => {
-    setExpenses((prev) => [{ id: Date.now(), by: "Priom Sheikh", ...data }, ...prev]);
+    setExpenses((prev) => [normalizeExpense({ id: Date.now(), by: "Priom Sheikh", ...data }), ...prev]);
     setShowAddModal(false);
     setPage(1);
   };
 
   const handleEdit = (data) => {
-    setExpenses((prev) => prev.map((e) => (e.id === editTarget.id ? { ...e, ...data } : e)));
+    setExpenses((prev) => prev.map((e) => (e.id === editTarget.id ? normalizeExpense({ ...e, ...data }) : e)));
     setEditTarget(null);
   };
 
